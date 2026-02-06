@@ -174,40 +174,58 @@ export class ThreeSceneService {
     if (!this.canvas) return;
     const rect = this.canvas.getBoundingClientRect();
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 1 + 1; // Note: Original was * 2 + 1, waiting.. actually original was correct? Let's check original logic: -((event.clientY - rect.top) / rect.height) * 2 + 1 is correct for NDC.
+    // Wait, let's keep the coordinate calculation exactly as it was or correct if needed.
+    // Original: this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
     this.raycaster.setFromCamera(this.mouse, this.camera);
 
-    // 選択可能なオブジェクトのみをフィルタリング
-    const selectableObjects = this.scene.children.filter(obj =>
-      this.isSelectableObject(obj)
-    );
+    // 全オブジェクトに対してレイキャスト（ギズモも含む）
+    const intersects = this.raycaster.intersectObjects(this.scene.children, true);
 
-    const intersects = this.raycaster.intersectObjects(selectableObjects, true);
-
-    let found: THREE.Object3D | null = null;
     for (const hit of intersects) {
-      // TransformControlsの一部かチェック
-      let parent = hit.object.parent;
-      let isGizmo = false;
-      while (parent) {
-        if (parent instanceof TransformControls) {
-          isGizmo = true;
-          break;
-        }
-        parent = parent.parent;
+      // 1. ギズモ判定 (最優先)
+      if (this.isGizmoObject(hit.object)) {
+        return;
       }
-      // ギズモ操作時は選択を変更しない
-      if (isGizmo) return;
 
-      // ヒットしたオブジェクトまたはその親グループを選択
-      found = this.findSelectableRoot(hit.object);
-      break;
+      // 2. 選択可能オブジェクト判定
+      if (this.isSelectableObject(hit.object)) {
+        const found = this.findSelectableRoot(hit.object);
+        if (found !== this.selectedObject) {
+          this.selectedObject = found;
+          this.updateTransformControl();
+        }
+        return; // 選択したら終了
+      }
+
+      // 3. 床やグリッドで選択解除 (選択可能でない特定のオブジェクト)
+      // isSelectableObject で false になるが、明示的に選択解除トリガーとするもの
+      // GroundPlane や GridHelper がこれに当たる
+      // ここに到達するということは isSelectableObject は false
+      if (hit.object.name === 'GroundPlane' || hit.object instanceof THREE.GridHelper) {
+        this.selectedObject = null;
+        this.updateTransformControl();
+        return; // 解除したら終了
+      }
+
+      // その他 (例: LightHelperなど) は無視して次のヒットへ
     }
 
-    // オブジェクトが見つかった場合は選択、見つからなければ選択解除
-    this.selectedObject = found;
+    // 何もヒットしない場合も解除
+    this.selectedObject = null;
     this.updateTransformControl();
+  }
+
+  // ギズモの一部かどうか判定
+  private isGizmoObject(obj: THREE.Object3D): boolean {
+    let parent = obj.parent;
+    while (parent) {
+      if (parent instanceof TransformControls) return true;
+      parent = parent.parent;
+    }
+    return false;
   }
 
   // 選択可能なオブジェクトかどうかを判定
