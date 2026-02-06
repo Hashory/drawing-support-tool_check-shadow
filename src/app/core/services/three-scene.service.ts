@@ -177,37 +177,56 @@ export class ThreeSceneService {
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
     this.raycaster.setFromCamera(this.mouse, this.camera);
-    const intersects = this.raycaster.intersectObjects(this.scene.children, true);
+
+    // 選択可能なオブジェクトのみをフィルタリング
+    const selectableObjects = this.scene.children.filter(obj =>
+      this.isSelectableObject(obj)
+    );
+
+    const intersects = this.raycaster.intersectObjects(selectableObjects, true);
 
     let found: THREE.Object3D | null = null;
     for (const hit of intersects) {
-      // Ignore helpers and floor
-      if (hit.object.name === 'GroundPlane' || hit.object.type === 'GridHelper' || hit.object.type === 'LineSegments') continue;
-      // Ignore transform controls
+      // TransformControlsの一部かチェック
       let parent = hit.object.parent;
+      let isGizmo = false;
       while (parent) {
-        if (parent instanceof TransformControls) return;
+        if (parent instanceof TransformControls) {
+          isGizmo = true;
+          break;
+        }
         parent = parent.parent;
       }
-      found = hit.object;
+      // ギズモ操作時は選択を変更しない
+      if (isGizmo) return;
 
-      // If found part of a group (like imported model), select the root group if possible
-      // But TransformControls works best on the Mesh or the Group. 
-      // For primitives, it is the Mesh. For Imports, it usually is a Group.
-      // Let's traverse up to find a "Selectable" root? 
-      // Simplified: Select the hit object.
+      // ヒットしたオブジェクトまたはその親グループを選択
+      found = this.findSelectableRoot(hit.object);
       break;
     }
 
-    // If clicking on nothing, deselect
-    if (!found) {
-      // Only deselect if not clicking on Gizmo (handled above)
-      this.selectedObject = null;
-    } else {
-      this.selectedObject = found;
-    }
-    // Update transform control manually since no signal/effect
+    // オブジェクトが見つかった場合は選択、見つからなければ選択解除
+    this.selectedObject = found;
     this.updateTransformControl();
+  }
+
+  // 選択可能なオブジェクトかどうかを判定
+  private isSelectableObject(obj: THREE.Object3D): boolean {
+    if (obj.name === 'GroundPlane') return false;
+    if (obj instanceof THREE.GridHelper) return false;
+    if (obj instanceof TransformControls) return false;
+    if (obj instanceof THREE.Light) return false;
+    return true;
+  }
+
+  // インポートモデルなどのグループの場合、ルートグループを取得
+  private findSelectableRoot(obj: THREE.Object3D): THREE.Object3D {
+    let current = obj;
+    while (current.parent && current.parent !== this.scene) {
+      if (current.parent instanceof TransformControls) break;
+      current = current.parent;
+    }
+    return current;
   }
 
   private updateTransformControl() {
